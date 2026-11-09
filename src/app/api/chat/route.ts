@@ -46,6 +46,33 @@ function trimHistory<T extends { content: string }>(history: T[]): T[] {
   return kept;
 }
 
+/*
+ * Some providers (e.g. Bedrock Mantle) reject any history whose roles do not
+ * strictly alternate user/assistant and that does not start with a user turn.
+ * A failed or aborted reply leaves two user messages in a row, and trimming can
+ * leave a leading assistant turn, so merge same-role neighbours and drop leading
+ * assistant turns before calling the provider.
+ */
+type ChatTurn = { role: "user" | "assistant"; content: string };
+
+function normalizeTurns(history: Array<{ role: string; content: string }>): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  for (const message of history) {
+    if (message.role === "system") continue;
+    const content = message.content.trim();
+    if (!content) continue;
+    const role = message.role === "assistant" ? "assistant" : "user";
+    const previous = turns[turns.length - 1];
+    if (previous && previous.role === role) {
+      previous.content = `${previous.content}\n\n${content}`;
+    } else {
+      turns.push({ role, content });
+    }
+  }
+  while (turns.length > 0 && turns[0].role === "assistant") turns.shift();
+  return turns;
+}
+
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -105,7 +132,7 @@ export async function POST(request: Request) {
     role: message.role,
     content: message.content,
   }));
-  const context = trimHistory(history);
+  const context = normalizeTurns(trimHistory(history));
   const messages = systemPrompt
     ? [{ role: "system" as const, content: systemPrompt }, ...context]
     : context;

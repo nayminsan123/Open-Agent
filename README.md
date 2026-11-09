@@ -168,3 +168,6 @@ data/
   user's default prompt; otherwise the current default is sent on every request.
 - Long chats are trimmed to the newest 40 messages (about 48k characters) before being sent to
   the provider, so a long history cannot exceed the model's context window.
+- Before each request the history is normalised for providers that demand strict role
+  alternation: a failed or aborted reply can leave two user turns in a row, so consecutive
+  same-role turns are merged and leading assistant turns are dropped.
