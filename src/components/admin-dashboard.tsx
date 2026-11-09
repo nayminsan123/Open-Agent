@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { AdminUser, ProviderSettingsView, PublicUser, UserRole } from "@/lib/types";
 import { cn, formatDate, initials } from "@/lib/utils";
@@ -64,6 +64,11 @@ export function AdminDashboard({
   const [allowSignup, setAllowSignup] = useState(initialSettings.allowSignup);
   const [hasApiKey, setHasApiKey] = useState(initialSettings.hasApiKey);
 
+  const [models, setModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [customModel, setCustomModel] = useState(false);
+
   const [savingSettings, setSavingSettings] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -80,6 +85,60 @@ export function AdminDashboard({
     setError(null);
     window.setTimeout(() => setNotice(null), 3500);
   };
+
+  // Ask the provider for its model list using the values currently in the form, so
+  // the fallback model can be picked before (or without) saving the settings.
+  const loadModelList = useCallback(async () => {
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const response = await fetch("/api/admin/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl, apiKey: apiKey.trim() || undefined }),
+      });
+      const data = (await response.json()) as { models?: string[]; error?: string };
+      if (!response.ok) throw new Error(data.error ?? "Could not load models.");
+      setModels(data.models ?? []);
+      setModelsError(data.error ?? null);
+    } catch (err) {
+      setModels([]);
+      setModelsError(err instanceof Error ? err.message : "Could not load models.");
+    } finally {
+      setModelsLoading(false);
+    }
+  }, [apiKey, baseUrl]);
+
+  // Load the current (saved) provider's list once when the page opens.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ baseUrl: initialSettings.baseUrl }),
+    })
+      .then(async (response) => ({
+        ok: response.ok,
+        data: (await response.json()) as { models?: string[]; error?: string },
+      }))
+      .then(({ ok, data }) => {
+        if (cancelled) return;
+        setModels(ok ? (data.models ?? []) : []);
+        setModelsError(data.error ?? (ok ? null : "Could not load models."));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setModels([]);
+          setModelsError(err instanceof Error ? err.message : "Could not load models.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setModelsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialSettings.baseUrl]);
 
   const saveSettings = async () => {
     setSavingSettings(true);
@@ -103,6 +162,7 @@ export function AdminDashboard({
       setApiKey("");
       setClearKey(false);
       flash("Provider settings saved.");
+      void loadModelList();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save settings.");
     } finally {
@@ -213,6 +273,10 @@ export function AdminDashboard({
       setBusyId(null);
     }
   };
+
+  // Keep a saved model selectable even when the provider no longer reports it.
+  const modelChoices =
+    defaultModel && !models.includes(defaultModel) ? [defaultModel, ...models] : models;
 
   return (
     <div className="min-h-dvh bg-[#070908]">
@@ -337,16 +401,80 @@ export function AdminDashboard({
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="defaultModel" className="text-[11px] font-medium text-zinc-400">
-                Fallback model
-              </label>
-              <input
-                id="defaultModel"
-                value={defaultModel}
-                onChange={(event) => setDefaultModel(event.target.value)}
-                placeholder="gpt-4o-mini"
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-400/30 focus:ring-2 focus:ring-emerald-400/10 focus:outline-none"
-              />
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="defaultModel" className="text-[11px] font-medium text-zinc-400">
+                  Fallback model
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void loadModelList()}
+                  disabled={modelsLoading}
+                  title="Load the model list from the provider"
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300 disabled:opacity-40"
+                >
+                  <RefreshIcon className={cn("size-3", modelsLoading && "animate-spin")} />
+                  {modelsLoading
+                    ? "loading…"
+                    : models.length > 0
+                      ? `${models.length} models`
+                      : "load models"}
+                </button>
+              </div>
+
+              {models.length > 0 && !customModel ? (
+                <select
+                  id="defaultModel"
+                  value={defaultModel}
+                  onChange={(event) => setDefaultModel(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-[#0c100f] px-2 py-2 font-mono text-[11px] text-zinc-200 focus:border-emerald-400/30 focus:outline-none"
+                >
+                  <option value="" disabled>
+                    Select a model…
+                  </option>
+                  {modelChoices.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="defaultModel"
+                  list="admin-model-options"
+                  value={defaultModel}
+                  onChange={(event) => setDefaultModel(event.target.value)}
+                  placeholder={models[0] ?? "gpt-4o-mini"}
+                  className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-400/30 focus:ring-2 focus:ring-emerald-400/10 focus:outline-none"
+                />
+              )}
+              <datalist id="admin-model-options">
+                {models.map((model) => (
+                  <option key={model} value={model} />
+                ))}
+              </datalist>
+
+              {models.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCustomModel((value) => !value)}
+                  className="text-[9.5px] text-zinc-500 underline decoration-white/20 underline-offset-2 transition hover:text-zinc-300"
+                >
+                  {customModel ? "Pick from the provider list" : "Use a custom model id"}
+                </button>
+              )}
+
+              {modelsError ? (
+                <p className="text-[10px] leading-relaxed text-rose-300/80">{modelsError}</p>
+              ) : models.length > 0 && defaultModel && !models.includes(defaultModel) ? (
+                <p className="text-[10px] leading-relaxed text-amber-300/80">
+                  This model is not in the provider list — pick one above.
+                </p>
+              ) : (
+                <p className="text-[10px] leading-relaxed text-zinc-600">
+                  The list comes from {"{Base URL}"}/models; refresh it after changing the URL or
+                  key.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1.5">

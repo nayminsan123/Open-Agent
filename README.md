@@ -41,7 +41,8 @@ npm start
    - **Base URL** — e.g. `https://api.openai.com/v1`, `http://localhost:11434/v1` (Ollama),
      `http://localhost:1234/v1` (LM Studio), `https://openrouter.ai/api/v1`
    - **API key** — required for hosted providers, optional for local ones
-   - **Fallback model** — used when nothing else is selected
+   - **Fallback model** — used when nothing else is selected; pick one from the list the
+     provider reports (press **load models** next to the field to fetch it for the URL/key above)
    - **Open sign-ups** — off by default; leave it off and create accounts in the admin panel
 4. Press **Test connection** to verify, then **Save settings**.
 5. Back in the chat, pick a model in the header and start a conversation.
@@ -110,6 +111,7 @@ foreign keys on, cascade deletes so removing a user removes their conversations.
 | `/api/conversations/[id]` | GET/PATCH/DELETE | Detail with messages, rename/model/system prompt, delete |
 | `/api/chat` | POST | NDJSON stream (see above) |
 | `/api/admin/settings` | GET/PUT | Provider config + sign-up toggle (admin only) |
+| `/api/admin/models` | POST | Model list for a draft base URL/key, used by the fallback-model picker (admin only) |
 | `/api/admin/users` | GET/POST | List / create users (admin only) |
 | `/api/admin/users/[id]` | PATCH/DELETE | Role, password reset, delete (admin only) |
 
