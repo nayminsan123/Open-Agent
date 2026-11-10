@@ -10,7 +10,6 @@ import {
   MessageIcon,
   PlusIcon,
   SearchIcon,
-  SettingsIcon,
   ShieldIcon,
   SparkIcon,
   TrashIcon,
@@ -26,7 +25,6 @@ export function Sidebar({
   onSelect,
   onNew,
   onDelete,
-  onOpenSettings,
   onSignOut,
 }: {
   user: PublicUser;
@@ -37,7 +35,6 @@ export function Sidebar({
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
-  onOpenSettings: () => void;
   onSignOut: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -203,14 +200,6 @@ export function Sidebar({
               <p className="truncate text-[12px] font-medium text-zinc-200">{user.name}</p>
               <p className="truncate font-mono text-[9px] text-zinc-600">{user.email}</p>
             </div>
-            <button
-              onClick={onOpenSettings}
-              className="rounded p-1.5 text-zinc-600 transition hover:bg-white/5 hover:text-zinc-200"
-              aria-label="Chat settings"
-              title="Chat settings"
-            >
-              <SettingsIcon className="size-3.5" />
-            </button>
             <button
               onClick={onSignOut}
               className="rounded p-1.5 text-zinc-600 transition hover:bg-rose-400/10 hover:text-rose-300"

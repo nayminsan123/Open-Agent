@@ -139,7 +139,6 @@ src/
     sidebar.tsx                     # conversation groups, search, user footer
     chat-message.tsx, markdown.tsx  # message rendering, markdown + code blocks
     composer.tsx, model-picker.tsx  # input box, model dropdown
-    settings-dialog.tsx             # per-user defaults
     admin-dashboard.tsx             # provider + user management
     auth-form.tsx                   # login / register
     icons.tsx

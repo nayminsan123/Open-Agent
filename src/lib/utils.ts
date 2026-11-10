@@ -69,13 +69,6 @@ export function initials(name: string) {
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
-export function temperatureLabel(value: number) {
-  if (value <= 0.3) return "Precise";
-  if (value <= 0.8) return "Balanced";
-  if (value <= 1.3) return "Creative";
-  return "Wild";
-}
-
 export function greeting(date = new Date()) {
   const hour = date.getHours();
   if (hour < 5) return "Working late";

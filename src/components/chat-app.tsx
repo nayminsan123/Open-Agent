@@ -17,12 +17,10 @@ import {
   AlertIcon,
   MenuIcon,
   PlusIcon,
-  SettingsIcon,
   SparkIcon,
   XIcon,
 } from "./icons";
 import { ModelPicker } from "./model-picker";
-import { SettingsDialog } from "./settings-dialog";
 import { Sidebar } from "./sidebar";
 
 function pickModel(preferred: string, models: string[]) {
@@ -84,8 +82,6 @@ export function ChatApp({
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [preferences, setPreferences] = useState<UserPreferences>(initialPreferences);
   const [model, setModel] = useState(
     pickModel(initialActiveModel ?? initialPreferences.defaultModel, []),
   );
@@ -168,7 +164,7 @@ export function ChatApp({
           throw new Error(data.error ?? "Could not load this conversation.");
         }
         setMessages(data.messages);
-        setModel(data.conversation.model || pickModel(preferences.defaultModel, models));
+        setModel(data.conversation.model || pickModel(initialPreferences.defaultModel, models));
         setConversations((prev) =>
           prev.map((conversation) =>
             conversation.id === data.conversation!.id ? data.conversation! : conversation,
@@ -183,7 +179,7 @@ export function ChatApp({
         if (requestId === loadRequestRef.current) setLoadingMessages(false);
       }
     },
-    [models, preferences.defaultModel, streaming],
+    [models, initialPreferences.defaultModel, streaming],
   );
 
   const newChat = useCallback(() => {
@@ -194,11 +190,11 @@ export function ChatApp({
     setInput("");
     setError(null);
     setLoadingMessages(false);
-    setModel(pickModel(preferences.defaultModel, models));
+    setModel(pickModel(initialPreferences.defaultModel, models));
     setSidebarOpen(false);
     pinnedRef.current = true;
     window.history.replaceState(null, "", "/");
-  }, [models, preferences.defaultModel]);
+  }, [models, initialPreferences.defaultModel]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -239,8 +235,8 @@ export function ChatApp({
           conversationId,
           message: text,
           model,
-          systemPrompt: preferences.systemPrompt,
-          temperature: preferences.temperature,
+          systemPrompt: initialPreferences.systemPrompt,
+          temperature: initialPreferences.temperature,
         }),
       });
 
@@ -347,7 +343,7 @@ export function ChatApp({
         prev.filter((message) => message.id !== assistantId || message.content.trim().length > 0),
       );
     }
-  }, [activeId, input, loadingMessages, model, preferences, streaming]);
+  }, [activeId, initialPreferences, input, loadingMessages, model, streaming]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -400,14 +396,6 @@ export function ChatApp({
     }
   }, [router]);
 
-  const savePreferences = useCallback(
-    (next: UserPreferences) => {
-      setPreferences(next);
-      if (!activeId) setModel(pickModel(next.defaultModel, models));
-    },
-    [activeId, models],
-  );
-
   const firstName = user.name.split(/\s+/)[0] || user.name;
   const isEmpty = messages.length === 0;
 
@@ -422,7 +410,6 @@ export function ChatApp({
         onSelect={(id) => void openConversation(id)}
         onNew={newChat}
         onDelete={(id) => void deleteConversation(id)}
-        onOpenSettings={() => setSettingsOpen(true)}
         onSignOut={() => void signOut()}
       />
 
@@ -469,14 +456,6 @@ export function ChatApp({
               title="New chat"
             >
               <PlusIcon className="size-4" />
-            </button>
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-zinc-400 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-100"
-              aria-label="Chat settings"
-              title="Chat settings"
-            >
-              <SettingsIcon className="size-4" />
             </button>
           </div>
         </header>
@@ -595,15 +574,6 @@ export function ChatApp({
           />
         </div>
       </div>
-
-      {settingsOpen && (
-        <SettingsDialog
-          onClose={() => setSettingsOpen(false)}
-          preferences={preferences}
-          models={models}
-          onSaved={savePreferences}
-        />
-      )}
     </div>
   );
 }
