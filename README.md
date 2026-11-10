@@ -33,6 +33,33 @@ npm run build
 npm start
 ```
 
+## Docker
+
+The image builds a standalone Next.js server and runs as a non-root user (`uid 1001`).
+
+```bash
+docker compose up -d --build
+```
+
+Open http://localhost:3000 — the first account you register becomes the administrator.
+
+- The SQLite database lives in `./data` on the host and is mounted at `/app/data`
+  (`AGENT_DATA_DIR`). Back up that folder; deleting it resets the instance.
+- On Linux, if the container cannot write to `./data`, fix ownership once:
+  `sudo chown -R 1001:1001 data`.
+- Logs: `docker compose logs -f`; stop: `docker compose down`; update: `git pull && docker compose up -d --build`.
+- Without Compose:
+
+  ```bash
+  docker build -t openagent .
+  docker run -d --name openagent -p 3000:3000 -v "$PWD/data:/app/data" openagent
+  ```
+
+- Provider settings (base URL, API key, models, sign-ups) are configured in the Admin console
+  after the first login — no `.env` file is needed. The image build downloads the Geist fonts
+  from Google Fonts, so the build host needs outbound HTTPS.
+- Docker Desktop is not required for `npm run dev`; the image is only for deployment.
+
 ## First steps
 
 1. Register the first account — it is automatically granted `admin`.
@@ -52,7 +79,7 @@ npm start
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `AGENT_DATA_DIR` | `<project>/data` | Directory holding `agent.db`. Point it at a volume when self-hosting. |
-| `PORT` | `3000` | Port used by `npm start`. |
+| `PORT` | `3000` | Port the server listens on (`npm start` or the Docker image). |
 
 Provider settings (base URL, API key, fallback model, sign-up toggle) and user preferences are
 stored in the database, not in env files. To reset everything, stop the server and delete

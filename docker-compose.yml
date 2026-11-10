@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    image: openagent:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      AGENT_DATA_DIR: /app/data
+    volumes:
+      # SQLite database + WAL files. On Linux, `sudo chown -R 1001:1001 data`
+      # once if the container cannot write to it.
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "docker-healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
