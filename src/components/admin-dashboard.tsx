@@ -7,6 +7,7 @@ import type {
   AdminUser,
   ProviderSettingsView,
   PublicUser,
+  PythonToolServer,
   Skill,
   UserRole,
   WebSearchSettingsView,
@@ -28,6 +29,7 @@ import {
   UsersIcon,
 } from "./icons";
 import { ToolsCard } from "./tools-card";
+import { PythonToolsCard } from "./python-tools-card";
 
 function Card({
   icon,
@@ -60,12 +62,16 @@ export function AdminDashboard({
   initialSettings,
   initialWebSearch,
   initialSkills,
+  initialPythonServers,
+  initialPythonScripts,
 }: {
   currentUser: PublicUser;
   initialUsers: AdminUser[];
   initialSettings: ProviderSettingsView;
   initialWebSearch: WebSearchSettingsView;
   initialSkills: Skill[];
+  initialPythonServers: PythonToolServer[];
+  initialPythonScripts: string[];
 }) {
   const [users, setUsers] = useState<AdminUser[]>(initialUsers);
   const [baseUrl, setBaseUrl] = useState(initialSettings.baseUrl);
@@ -543,6 +549,10 @@ export function AdminDashboard({
         </Card>
 
         <ToolsCard initialWebSearch={initialWebSearch} initialSkills={initialSkills} />
+        <PythonToolsCard
+          initialServers={initialPythonServers}
+          initialScripts={initialPythonScripts}
+        />
 
         <Card
           icon={<UsersIcon className="size-4" />}

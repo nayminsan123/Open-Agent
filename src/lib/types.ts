@@ -75,6 +75,14 @@ export interface McpServer {
   createdAt: number;
 }
 
+export interface PythonToolServer {
+  id: string;
+  name: string;
+  script: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
 export interface ModelsResponse {
   models: string[];
   error?: string;

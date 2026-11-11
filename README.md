@@ -86,6 +86,13 @@ Open **Admin console → Tools & skills**.
   calling — if yours does not, leave web search disabled.
 - **Skills** — a title plus instructions. Every enabled skill is appended to the system prompt
   of every chat, so it behaves like a reusable, instance-wide instruction.
+- **Python tools** — write an MCP server with the Python SDK, copy its `.py` file into
+  `data/python-tools/`, then register it from **Admin console → Python tools**. The image includes
+  Python and the MCP SDK. `examples/python-tools/basic.py` is a minimal example; copy it to
+  `data/python-tools/basic.py` and use **Add & test** to discover its tools. Add any extra Python
+  dependencies to `requirements-python.txt` and rebuild the image. Python scripts are trusted code:
+  they run inside the application container and can access data available to that container. Keep
+  the tool folder private and do not add scripts from untrusted sources.
 
 Use **Test** next to the search URL to check a query against the draft URL/key before saving.
 SearXNG must have the JSON format enabled (`search.formats` includes `json`).
@@ -95,6 +102,8 @@ SearXNG must have the JSON format enabled (`search.formats` includes `json`).
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `AGENT_DATA_DIR` | `<project>/data` | Directory holding `agent.db`. Point it at a volume when self-hosting. |
+| `AGENT_PYTHON_TOOLS_DIR` | `<data dir>/python-tools` | Directory containing trusted Python MCP server scripts. |
+| `AGENT_PYTHON_COMMAND` | `python3` | Python executable used to launch MCP servers. The Docker image sets this to its MCP-enabled virtual environment. |
 | `PORT` | `3000` | Port the server listens on (`npm start` or the Docker image). |
 
 Provider settings (base URL, API key, fallback model, sign-up toggle) and user preferences are

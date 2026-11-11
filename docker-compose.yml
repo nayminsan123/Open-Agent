@@ -7,10 +7,14 @@ services:
       - "3000:3000"
     environment:
       AGENT_DATA_DIR: /app/data
+      AGENT_PYTHON_TOOLS_DIR: /app/python-tools
+      AGENT_PYTHON_COMMAND: /opt/python/bin/python
     volumes:
       # SQLite database + WAL files. On Linux, `sudo chown -R 1001:1001 data`
       # once if the container cannot write to it.
       - ./data:/app/data
+      # Put trusted Python MCP server scripts in ./data/python-tools on the host.
+      - ./data/python-tools:/app/python-tools:ro
     healthcheck:
       test: ["CMD", "node", "docker-healthcheck.mjs"]
       interval: 30s

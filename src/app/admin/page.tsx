@@ -1,7 +1,14 @@
 import { redirect } from "next/navigation";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { getCurrentUser } from "@/lib/auth";
-import { getProviderSettings, getWebSearchSettings, listSkills, listUsers } from "@/lib/db";
+import {
+  getProviderSettings,
+  getWebSearchSettings,
+  listMcpServers,
+  listSkills,
+  listUsers,
+} from "@/lib/db";
+import { isPythonToolServer, listPythonToolScripts, toPythonToolServer } from "@/lib/python-tools";
 
 export const metadata = { title: "Admin · OpenAgent" };
 
@@ -12,6 +19,8 @@ export default async function AdminPage() {
 
   const settings = getProviderSettings();
   const search = getWebSearchSettings();
+  const pythonServers = listMcpServers().filter(isPythonToolServer).map(toPythonToolServer);
+  const pythonScripts = await listPythonToolScripts();
 
   return (
     <AdminDashboard
@@ -29,6 +38,8 @@ export default async function AdminPage() {
         hasApiKey: search.apiKey.length > 0,
       }}
       initialSkills={listSkills()}
+      initialPythonServers={pythonServers}
+      initialPythonScripts={pythonScripts}
     />
   );
 }

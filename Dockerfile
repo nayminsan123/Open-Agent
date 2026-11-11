@@ -29,17 +29,28 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    AGENT_DATA_DIR=/app/data
+    AGENT_DATA_DIR=/app/data \
+    AGENT_PYTHON_TOOLS_DIR=/app/python-tools \
+    AGENT_PYTHON_COMMAND=/opt/python/bin/python \
+    PATH=/opt/python/bin:$PATH
 
 RUN groupadd --system --gid 1001 nodejs \
- && useradd --system --uid 1001 --gid nodejs --create-home nextjs
+ && useradd --system --uid 1001 --gid nodejs --create-home nextjs \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-venv \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-python.txt ./requirements-python.txt
+
+RUN python3 -m venv /opt/python \
+ && /opt/python/bin/pip install --no-cache-dir -r requirements-python.txt
 
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # The SQLite database (and its WAL files) live here; mount a volume to persist it.
-RUN mkdir -p /app/data && chown -R nextjs:nodejs /app/data
+RUN mkdir -p /app/data /app/python-tools && chown -R nextjs:nodejs /app/data /app/python-tools
 
 COPY --chown=nextjs:nodejs docker-healthcheck.mjs ./docker-healthcheck.mjs
 
