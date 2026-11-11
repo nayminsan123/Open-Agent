@@ -74,6 +74,22 @@ Open http://localhost:3000 — the first account you register becomes the admini
 4. Press **Test connection** to verify, then **Save settings**.
 5. Back in the chat, pick a model in the header and start a conversation.
 
+## Tools & skills
+
+Open **Admin console → Tools & skills**.
+
+- **Web search** — paste a SearXNG base URL (for example `https://searx.example.com`) or any
+  URL template containing `{query}` that returns JSON. An optional API key is sent as
+  `Authorization: Bearer` and `X-Subscription-Token`. While enabled, chat requests offer the
+  model a `web_search` tool; the server runs the search and feeds the results back, and the
+  chat shows `web search: …` while it happens. The model must support OpenAI-style tool
+  calling — if yours does not, leave web search disabled.
+- **Skills** — a title plus instructions. Every enabled skill is appended to the system prompt
+  of every chat, so it behaves like a reusable, instance-wide instruction.
+
+Use **Test** next to the search URL to check a query against the draft URL/key before saving.
+SearXNG must have the JSON format enabled (`search.formats` includes `json`).
+
 ## Configuration
 
 | Env var | Default | Purpose |
@@ -139,6 +155,9 @@ foreign keys on, cascade deletes so removing a user removes their conversations.
 | `/api/chat` | POST | NDJSON stream (see above) |
 | `/api/admin/settings` | GET/PUT | Provider config + sign-up toggle (admin only) |
 | `/api/admin/models` | POST | Model list for a draft base URL/key, used by the fallback-model picker (admin only) |
+| `/api/admin/skills` | GET/POST | List / create skills (admin only) |
+| `/api/admin/skills/[id]` | PATCH/DELETE | Toggle, edit or delete a skill (admin only) |
+| `/api/admin/web-search` | POST | Run a test search with the draft URL/key (admin only) |
 | `/api/admin/users` | GET/POST | List / create users (admin only) |
 | `/api/admin/users/[id]` | PATCH/DELETE | Role, password reset, delete (admin only) |
 
@@ -166,6 +185,7 @@ src/
     sidebar.tsx                     # conversation groups, search, user footer
     chat-message.tsx, markdown.tsx  # message rendering, markdown + code blocks
     composer.tsx, model-picker.tsx  # input box, model dropdown
+    tools-card.tsx                  # web search + skills management
     admin-dashboard.tsx             # provider + user management
     auth-form.tsx                   # login / register
     icons.tsx

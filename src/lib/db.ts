@@ -3,7 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_MODEL, DEFAULT_SYSTEM_PROMPT, DEFAULT_TEMPERATURE } from "./defaults";
-import type { ChatMessage, Conversation, PublicUser, UserPreferences } from "./types";
+import type {
+  ChatMessage,
+  Conversation,
+  McpServer,
+  PublicUser,
+  Skill,
+  UserPreferences,
+} from "./types";
 
 export interface DbUser {
   id: string;
@@ -45,6 +52,9 @@ const SETTINGS_DEFAULTS: Record<string, string> = {
   provider_api_key: "",
   allow_signup: "false",
   default_model: DEFAULT_MODEL,
+  web_search_enabled: "false",
+  web_search_url: "",
+  web_search_api_key: "",
 };
 
 const SCHEMA = `
@@ -93,6 +103,25 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS skills (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    instructions TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS mcp_servers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    transport TEXT NOT NULL DEFAULT 'http',
+    url TEXT NOT NULL DEFAULT '',
+    command TEXT NOT NULL DEFAULT '',
+    args TEXT NOT NULL DEFAULT '[]',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
   );
 `;
 
@@ -143,6 +172,14 @@ export function getProviderSettings() {
     apiKey: getSetting("provider_api_key", ""),
     defaultModel: getSetting("default_model", SETTINGS_DEFAULTS.default_model),
     allowSignup: getSetting("allow_signup", "false") === "true",
+  };
+}
+
+export function getWebSearchSettings() {
+  return {
+    enabled: getSetting("web_search_enabled", "false") === "true",
+    url: getSetting("web_search_url", ""),
+    apiKey: getSetting("web_search_api_key", ""),
   };
 }
 
@@ -450,6 +487,211 @@ export function addMessage(conversationId: string, role: DbMessage["role"], cont
   );
 
   return mapMessage(message);
+}
+
+/* ------------------------------------------------------------------- skills */
+
+interface DbSkill {
+  id: string;
+  title: string;
+  instructions: string;
+  enabled: number;
+  created_at: number;
+}
+
+function mapSkill(row: DbSkill): Skill {
+  return {
+    id: row.id,
+    title: row.title,
+    instructions: row.instructions,
+    enabled: row.enabled === 1,
+    createdAt: row.created_at,
+  };
+}
+
+export function listSkills(): Skill[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM skills ORDER BY created_at ASC")
+    .all() as unknown as DbSkill[];
+  return rows.map(mapSkill);
+}
+
+export function listEnabledSkills(): Skill[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM skills WHERE enabled = 1 ORDER BY created_at ASC")
+    .all() as unknown as DbSkill[];
+  return rows.map(mapSkill);
+}
+
+export function createSkill(input: {
+  title: string;
+  instructions: string;
+  enabled?: boolean;
+}): Skill {
+  const row: DbSkill = {
+    id: randomUUID(),
+    title: input.title.trim().slice(0, 120),
+    instructions: input.instructions.trim().slice(0, 4000),
+    enabled: input.enabled === false ? 0 : 1,
+    created_at: Date.now(),
+  };
+  getDb()
+    .prepare("INSERT INTO skills (id, title, instructions, enabled, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(row.id, row.title, row.instructions, row.enabled, row.created_at);
+  return mapSkill(row);
+}
+
+export function updateSkill(
+  id: string,
+  patch: { title?: string; instructions?: string; enabled?: boolean },
+): Skill | null {
+  const row = getDb().prepare("SELECT * FROM skills WHERE id = ?").get(id) as DbSkill | undefined;
+  if (!row) return null;
+
+  const title = patch.title !== undefined ? patch.title.trim().slice(0, 120) || row.title : row.title;
+  const instructions =
+    patch.instructions !== undefined ? patch.instructions.trim().slice(0, 4000) : row.instructions;
+  const enabled = patch.enabled === undefined ? row.enabled : patch.enabled ? 1 : 0;
+
+  getDb()
+    .prepare("UPDATE skills SET title = ?, instructions = ?, enabled = ? WHERE id = ?")
+    .run(title, instructions, enabled, id);
+
+  return mapSkill({ ...row, title, instructions, enabled });
+}
+
+export function deleteSkill(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM skills WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+/* ----------------------------------------------------------------- MCP servers */
+
+interface DbMcpServer {
+  id: string;
+  name: string;
+  transport: string;
+  url: string;
+  command: string;
+  args: string;
+  enabled: number;
+  created_at: number;
+}
+
+function mapMcpServer(row: DbMcpServer): McpServer {
+  let args: string[] = [];
+  try {
+    const parsed = JSON.parse(row.args) as unknown;
+    if (Array.isArray(parsed)) args = parsed.map((item) => String(item));
+  } catch {
+    args = [];
+  }
+  return {
+    id: row.id,
+    name: row.name,
+    transport: row.transport === "stdio" ? "stdio" : "http",
+    url: row.url,
+    command: row.command,
+    args,
+    enabled: row.enabled === 1,
+    createdAt: row.created_at,
+  };
+}
+
+export function listMcpServers(): McpServer[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM mcp_servers ORDER BY created_at ASC")
+    .all() as unknown as DbMcpServer[];
+  return rows.map(mapMcpServer);
+}
+
+export function listEnabledMcpServers(): McpServer[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM mcp_servers WHERE enabled = 1 ORDER BY created_at ASC")
+    .all() as unknown as DbMcpServer[];
+  return rows.map(mapMcpServer);
+}
+
+export function createMcpServer(input: {
+  name: string;
+  transport: "http" | "stdio";
+  url?: string;
+  command?: string;
+  args?: string[];
+  enabled?: boolean;
+}): McpServer {
+  const row: DbMcpServer = {
+    id: randomUUID(),
+    name: input.name.trim().slice(0, 120),
+    transport: input.transport,
+    url: (input.url ?? "").trim(),
+    command: (input.command ?? "").trim(),
+    args: JSON.stringify(input.args ?? []),
+    enabled: input.enabled === false ? 0 : 1,
+    created_at: Date.now(),
+  };
+  getDb()
+    .prepare(
+      "INSERT INTO mcp_servers (id, name, transport, url, command, args, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      row.id,
+      row.name,
+      row.transport,
+      row.url,
+      row.command,
+      row.args,
+      row.enabled,
+      row.created_at,
+    );
+  return mapMcpServer(row);
+}
+
+export function updateMcpServer(
+  id: string,
+  patch: {
+    name?: string;
+    transport?: "http" | "stdio";
+    url?: string;
+    command?: string;
+    args?: string[];
+    enabled?: boolean;
+  },
+): McpServer | null {
+  const row = getDb().prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as
+    | DbMcpServer
+    | undefined;
+  if (!row) return null;
+
+  const updated: DbMcpServer = {
+    ...row,
+    name: patch.name !== undefined ? patch.name.trim().slice(0, 120) || row.name : row.name,
+    transport:
+      patch.transport !== undefined ? (patch.transport === "stdio" ? "stdio" : "http") : row.transport,
+    url: patch.url !== undefined ? patch.url.trim() : row.url,
+    command: patch.command !== undefined ? patch.command.trim() : row.command,
+    args: patch.args !== undefined ? JSON.stringify(patch.args) : row.args,
+    enabled: patch.enabled === undefined ? row.enabled : patch.enabled ? 1 : 0,
+  };
+  getDb()
+    .prepare(
+      "UPDATE mcp_servers SET name = ?, transport = ?, url = ?, command = ?, args = ?, enabled = ? WHERE id = ?",
+    )
+    .run(
+      updated.name,
+      updated.transport,
+      updated.url,
+      updated.command,
+      updated.args,
+      updated.enabled,
+      id,
+    );
+  return mapMcpServer(updated);
+}
+
+export function deleteMcpServer(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+  return result.changes > 0;
 }
 
 /* ------------------------------------------------------------------- misc */

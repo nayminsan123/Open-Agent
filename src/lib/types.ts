@@ -42,6 +42,39 @@ export interface ProviderSettingsView {
   allowSignup: boolean;
 }
 
+export interface WebSearchSettingsView {
+  enabled: boolean;
+  url: string;
+  hasApiKey: boolean;
+}
+
+export interface Skill {
+  id: string;
+  title: string;
+  instructions: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export type McpTransport = "http" | "stdio";
+
+export interface McpServer {
+  id: string;
+  name: string;
+  transport: McpTransport;
+  url: string;
+  command: string;
+  args: string[];
+  enabled: boolean;
+  createdAt: number;
+}
+
 export interface ModelsResponse {
   models: string[];
   error?: string;
@@ -50,6 +83,7 @@ export interface ModelsResponse {
 export type ChatStreamEvent =
   | { type: "conversation"; conversation: Conversation }
   | { type: "delta"; text: string }
+  | { type: "tool"; name: string; detail: string; status: "running" | "done" | "error"; summary?: string }
   | { type: "done"; message: ChatMessage }
   | { type: "error"; message: string };
 

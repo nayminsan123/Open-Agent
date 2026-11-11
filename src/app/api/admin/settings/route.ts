@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth";
-import { getProviderSettings, setSetting } from "@/lib/db";
+import { getProviderSettings, getWebSearchSettings, setSetting } from "@/lib/db";
 import { clearModelCache } from "@/lib/llm";
 
 async function requireAdmin() {
@@ -11,17 +11,26 @@ async function requireAdmin() {
   return { user };
 }
 
-export async function GET() {
-  const guard = await requireAdmin();
-  if (guard.error) return guard.error;
-
+function view() {
   const settings = getProviderSettings();
-  return Response.json({
+  const search = getWebSearchSettings();
+  return {
     baseUrl: settings.baseUrl,
     hasApiKey: settings.apiKey.length > 0,
     defaultModel: settings.defaultModel,
     allowSignup: settings.allowSignup,
-  });
+    webSearch: {
+      enabled: search.enabled,
+      url: search.url,
+      hasApiKey: search.apiKey.length > 0,
+    },
+  };
+}
+
+export async function GET() {
+  const guard = await requireAdmin();
+  if (guard.error) return guard.error;
+  return Response.json(view());
 }
 
 export async function PUT(request: Request) {
@@ -34,6 +43,10 @@ export async function PUT(request: Request) {
     clearApiKey?: unknown;
     defaultModel?: unknown;
     allowSignup?: unknown;
+    webSearchEnabled?: unknown;
+    webSearchUrl?: unknown;
+    webSearchApiKey?: unknown;
+    clearWebSearchApiKey?: unknown;
   };
   try {
     body = await request.json();
@@ -63,13 +76,28 @@ export async function PUT(request: Request) {
     setSetting("allow_signup", body.allowSignup ? "true" : "false");
   }
 
+  if (typeof body.webSearchUrl === "string") {
+    const url = body.webSearchUrl.trim();
+    if (url && !/^https?:\/\//i.test(url)) {
+      return Response.json(
+        { error: "Web search URL must start with http:// or https://." },
+        { status: 400 },
+      );
+    }
+    setSetting("web_search_url", url);
+  }
+
+  if (body.clearWebSearchApiKey === true) {
+    setSetting("web_search_api_key", "");
+  } else if (typeof body.webSearchApiKey === "string" && body.webSearchApiKey.trim()) {
+    setSetting("web_search_api_key", body.webSearchApiKey.trim());
+  }
+
+  if (typeof body.webSearchEnabled === "boolean") {
+    setSetting("web_search_enabled", body.webSearchEnabled ? "true" : "false");
+  }
+
   clearModelCache();
 
-  const settings = getProviderSettings();
-  return Response.json({
-    baseUrl: settings.baseUrl,
-    hasApiKey: settings.apiKey.length > 0,
-    defaultModel: settings.defaultModel,
-    allowSignup: settings.allowSignup,
-  });
+  return Response.json(view());
 }

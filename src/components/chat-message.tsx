@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ChatMessage } from "@/lib/types";
-import { formatClock, initials } from "@/lib/utils";
+import { cn, formatClock, initials } from "@/lib/utils";
 import { CheckIcon, CopyIcon, SparkIcon } from "./icons";
 import { Markdown } from "./markdown";
 
@@ -23,11 +23,13 @@ function TypingDots() {
 export function ChatMessageItem({
   message,
   streaming,
+  toolStatus,
   userName,
   modelName,
 }: {
   message: ChatMessage;
   streaming?: boolean;
+  toolStatus?: { name: string; detail: string; status: "running" | "done" | "error"; summary?: string } | null;
   userName: string;
   modelName: string;
 }) {
@@ -95,6 +97,21 @@ export function ChatMessageItem({
           </div>
         ) : (
           streaming && <TypingDots />
+        )}
+
+        {streaming && toolStatus && (
+          <p className="mt-1.5 flex items-center gap-1.5 font-mono text-[10px] text-zinc-500">
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                toolStatus.status === "running" ? "animate-pulse bg-amber-400" : "bg-emerald-400",
+              )}
+            />
+            <span className="truncate">
+              {toolStatus.name === "web_search" ? `web search: ${toolStatus.detail}` : toolStatus.name}
+              {toolStatus.summary ? ` · ${toolStatus.summary}` : ""}
+            </span>
+          </p>
         )}
       </div>
     </div>

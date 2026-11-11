@@ -88,6 +88,12 @@ export function ChatApp({
   const [models, setModels] = useState<string[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(true);
+  const [toolActivity, setToolActivity] = useState<{
+    name: string;
+    detail: string;
+    status: "running" | "done" | "error";
+    summary?: string;
+  } | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -278,6 +284,16 @@ export function ChatApp({
           return;
         }
 
+        if (event.type === "tool") {
+          setToolActivity({
+            name: event.name,
+            detail: event.detail,
+            status: event.status,
+            summary: event.summary,
+          });
+          return;
+        }
+
         if (event.type === "done") {
           setMessages((prev) =>
             prev.map((message) =>
@@ -339,6 +355,7 @@ export function ChatApp({
     } finally {
       abortRef.current = null;
       setStreaming(false);
+      setToolActivity(null);
       setMessages((prev) =>
         prev.filter((message) => message.id !== assistantId || message.content.trim().length > 0),
       );
@@ -547,6 +564,11 @@ export function ChatApp({
                   key={message.id}
                   message={message}
                   streaming={streaming && message.role === "assistant" && message.id.startsWith("local-")}
+                  toolStatus={
+                    streaming && message.role === "assistant" && message.id.startsWith("local-")
+                      ? toolActivity
+                      : null
+                  }
                   userName={user.name}
                   modelName={model}
                 />

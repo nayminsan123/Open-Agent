@@ -5,10 +5,13 @@ import {
   findUserById,
   getConversation,
   getUserPreferences,
+  listEnabledSkills,
   listMessages,
   updateConversation,
 } from "@/lib/db";
 import { authHeaders, getProviderConfig } from "@/lib/llm";
+import { callMcpTool, collectMcpTools, findMcpServer, type McpToolDef } from "@/lib/mcp";
+import { WEB_SEARCH_TOOL, executeTool, getWebSearchConfig } from "@/lib/tools";
 import type { ChatStreamEvent } from "@/lib/types";
 
 interface ChatBody {
@@ -32,6 +35,7 @@ function clamp(value: unknown, min: number, max: number, fallback: number) {
  */
 const MAX_CONTEXT_MESSAGES = 40;
 const MAX_CONTEXT_CHARS = 48_000;
+const MAX_TOOL_ROUNDS = 3;
 
 function trimHistory<T extends { content: string }>(history: T[]): T[] {
   const kept: T[] = [];
@@ -73,6 +77,166 @@ function normalizeTurns(history: Array<{ role: string; content: string }>): Chat
   return turns;
 }
 
+type OutgoingToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+type OutgoingMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: OutgoingToolCall[];
+  tool_call_id?: string;
+};
+
+interface ProviderToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+interface CompletionResult {
+  content: string;
+  toolCalls: ProviderToolCall[];
+}
+
+function describeProviderError(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.message.startsWith("Provider returned")) return error.message;
+    if (error.message === "fetch failed") return "Could not reach the provider.";
+    return `Could not reach the provider: ${error.message}`;
+  }
+  return "Could not reach the provider.";
+}
+
+function mcpToolToOpenAI(tool: McpToolDef) {
+  return {
+    type: "function",
+    function: {
+      name: tool.functionName,
+      description: tool.description,
+      parameters: tool.inputSchema ?? { type: "object", properties: {} },
+    },
+  };
+}
+
+/**
+ * One streaming provider call. Text deltas are forwarded as they arrive; tool
+ * calls are accumulated from the stream (OpenAI sends them incrementally) and
+ * returned once the response ends.
+ */
+async function streamChatCompletion(options: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: OutgoingMessage[];
+  temperature: number;
+  tools?: unknown[];
+  signal: AbortSignal;
+  onDelta: (text: string) => void;
+}): Promise<CompletionResult> {
+  const { baseUrl, apiKey, model, messages, temperature, tools, signal, onDelta } = options;
+
+  const upstream = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: authHeaders(apiKey),
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature,
+      stream: true,
+      ...(tools && tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+    }),
+    signal,
+    cache: "no-store",
+  });
+
+  if (!upstream.ok || !upstream.body) {
+    const detail = (await upstream.text().catch(() => "")).slice(0, 400);
+    throw new Error(`Provider returned ${upstream.status}${detail ? `: ${detail}` : ""}`);
+  }
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  const calls: ProviderToolCall[] = [];
+  let buffer = "";
+  let content = "";
+  let finished = false;
+
+  const mergeCall = (index: number, delta: Record<string, unknown>) => {
+    const call = (calls[index] ??= { id: "", name: "", arguments: "" });
+    if (typeof delta.id === "string" && delta.id) call.id = delta.id;
+    const fn = delta.function as { name?: unknown; arguments?: unknown } | undefined;
+    if (!fn) return;
+    // The name arrives once; arguments arrive in fragments and must be concatenated.
+    if (typeof fn.name === "string" && fn.name) call.name = fn.name;
+    if (typeof fn.arguments === "string") call.arguments += fn.arguments;
+  };
+
+  while (!finished) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+      buffer = buffer.slice(newlineIndex + 1);
+      newlineIndex = buffer.indexOf("\n");
+
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      if (payload === "[DONE]") {
+        finished = true;
+        break;
+      }
+
+      let parsed: {
+        choices?: Array<{
+          delta?: { content?: unknown; tool_calls?: unknown };
+          message?: { tool_calls?: unknown };
+        }>;
+        error?: { message?: string };
+      };
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+
+      if (parsed.error?.message) throw new Error(parsed.error.message);
+
+      const choice = parsed.choices?.[0];
+      const delta = choice?.delta;
+      if (delta) {
+        if (typeof delta.content === "string" && delta.content.length > 0) {
+          content += delta.content;
+          onDelta(delta.content);
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          for (const raw of delta.tool_calls) {
+            if (!raw || typeof raw !== "object") continue;
+            const item = raw as Record<string, unknown>;
+            const index = typeof item.index === "number" ? item.index : calls.length;
+            mergeCall(index, item);
+          }
+        }
+      }
+
+      // Providers that ignore stream:true send the finished message in one chunk.
+      if (Array.isArray(choice?.message?.tool_calls)) {
+        choice.message.tool_calls.forEach((raw, index) => {
+          if (raw && typeof raw === "object") mergeCall(index, raw as Record<string, unknown>);
+        });
+      }
+    }
+  }
+
+  return { content, toolCalls: calls.filter((call) => call.name) };
+}
+
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -110,7 +274,16 @@ export async function POST(request: Request) {
     typeof body.systemPrompt === "string" ? body.systemPrompt.trim().slice(0, 8000) : null;
   // A prompt configured on the conversation wins. Otherwise the caller's current
   // preference is used, so changing the default still affects existing chats.
-  const systemPrompt = conversationPrompt ?? bodyPrompt ?? preferences.systemPrompt;
+  const baseSystemPrompt = conversationPrompt ?? bodyPrompt ?? preferences.systemPrompt;
+
+  const enabledSkills = listEnabledSkills();
+  const skillsBlock =
+    enabledSkills.length > 0
+      ? `Skills — apply these when they are relevant:\n${enabledSkills
+          .map((skill) => `### ${skill.title}\n${skill.instructions}`)
+          .join("\n\n")}`
+      : "";
+  const systemPrompt = [baseSystemPrompt?.trim(), skillsBlock].filter(Boolean).join("\n\n");
 
   const temperature = clamp(body.temperature, 0, 2, preferences.temperature);
   const isNew = !conversation;
@@ -133,9 +306,18 @@ export async function POST(request: Request) {
     content: message.content,
   }));
   const context = normalizeTurns(trimHistory(history));
-  const messages = systemPrompt
-    ? [{ role: "system" as const, content: systemPrompt }, ...context]
-    : context;
+  const messages: OutgoingMessage[] = [
+    ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
+    ...context,
+  ];
+
+  const searchConfig = getWebSearchConfig();
+  const mcpTools = await collectMcpTools();
+  const toolSchemas = [
+    ...(searchConfig.enabled ? [WEB_SEARCH_TOOL] : []),
+    ...mcpTools.map(mcpToolToOpenAI),
+  ];
+  const customToolMap = new Map(mcpTools.map((tool) => [tool.functionName, tool]));
 
   const provider = getProviderConfig();
   const encoder = new TextEncoder();
@@ -157,77 +339,83 @@ export async function POST(request: Request) {
       let content = "";
       let hadError = false;
       try {
-        const upstream = await fetch(`${provider.baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: authHeaders(provider.apiKey),
-          body: JSON.stringify({ model, messages, temperature, stream: true }),
-          signal: request.signal,
-          cache: "no-store",
-        });
-
-        if (!upstream.ok || !upstream.body) {
-          const detail = (await upstream.text().catch(() => "")).slice(0, 400);
-          hadError = true;
-          send({
-            type: "error",
-            message: `Provider returned ${upstream.status}${detail ? `: ${detail}` : ""}`,
+        for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+          const result = await streamChatCompletion({
+            baseUrl: provider.baseUrl,
+            apiKey: provider.apiKey,
+            model,
+            messages,
+            temperature,
+            tools: toolSchemas,
+            signal: request.signal,
+            onDelta: (delta) => {
+              content += delta;
+              send({ type: "delta", text: delta });
+            },
           });
-        } else {
-          const reader = upstream.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          let upstreamDone = false;
 
-          while (!upstreamDone) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
+          if (result.toolCalls.length === 0) break;
 
-            let newlineIndex = buffer.indexOf("\n");
-            while (newlineIndex !== -1) {
-              const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
-              buffer = buffer.slice(newlineIndex + 1);
-              newlineIndex = buffer.indexOf("\n");
+          const callIds = result.toolCalls.map(
+            (call, index) => call.id || `call_${round}_${index}`,
+          );
+          messages.push({
+            role: "assistant",
+            content: result.content || null,
+            tool_calls: result.toolCalls.map((call, index) => ({
+              id: callIds[index],
+              type: "function",
+              function: { name: call.name, arguments: call.arguments || "{}" },
+            })),
+          });
 
-              if (!line.startsWith("data:")) continue;
-              const payload = line.slice(5).trim();
-              if (!payload) continue;
-              if (payload === "[DONE]") {
-                upstreamDone = true;
-                break;
-              }
+          for (const [index, call] of result.toolCalls.entries()) {
+            let detail = call.arguments;
+            try {
+              const args = JSON.parse(call.arguments || "{}") as { query?: unknown };
+              if (typeof args.query === "string" && args.query.trim()) detail = args.query;
+            } catch {
+              /* keep the raw arguments as the display detail */
+            }
 
-              try {
-                const parsed = JSON.parse(payload) as {
-                  choices?: Array<{ delta?: { content?: unknown } }>;
-                  error?: { message?: string };
-                };
-                if (parsed.error?.message) {
-                  hadError = true;
-                  send({ type: "error", message: parsed.error.message });
-                  continue;
+            send({ type: "tool", name: call.name, detail, status: "running" });
+
+            let execution: { content: string; summary: string };
+            if (call.name === "web_search") {
+              execution = await executeTool(call.name, call.arguments);
+            } else {
+              const toolDef = customToolMap.get(call.name);
+              if (!toolDef) {
+                execution = { content: `Unknown custom tool: ${call.name}`, summary: "unknown tool" };
+              } else {
+                const server = findMcpServer(toolDef.serverId);
+                if (!server) {
+                  execution = { content: `Tool server not found: ${toolDef.serverName}`, summary: "missing server" };
+                } else {
+                  const args = JSON.parse(call.arguments || "{}") as Record<string, unknown>;
+                  const out = await callMcpTool(server, toolDef.name, args);
+                  execution = {
+                    content: out.content || (out.isError ? "Tool returned an error." : ""),
+                    summary: out.isError ? "tool error" : "tool result",
+                  };
                 }
-                const delta = parsed.choices?.[0]?.delta?.content;
-                if (typeof delta === "string" && delta.length > 0) {
-                  content += delta;
-                  send({ type: "delta", text: delta });
-                }
-              } catch {
-                /* ignore malformed upstream chunks */
               }
             }
+
+            send({
+              type: "tool",
+              name: call.name,
+              detail,
+              status: "done",
+              summary: execution.summary,
+            });
+            messages.push({ role: "tool", tool_call_id: callIds[index], content: execution.content });
           }
         }
       } catch (error) {
         if (!request.signal.aborted) {
           hadError = true;
-          send({
-            type: "error",
-            message:
-              error instanceof Error
-                ? `Could not reach the provider: ${error.message}`
-                : "Could not reach the provider.",
-          });
+          send({ type: "error", message: describeProviderError(error) });
         }
       } finally {
         if (content.trim()) {

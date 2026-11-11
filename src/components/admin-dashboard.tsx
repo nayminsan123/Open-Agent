@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import type { AdminUser, ProviderSettingsView, PublicUser, UserRole } from "@/lib/types";
+import type {
+  AdminUser,
+  ProviderSettingsView,
+  PublicUser,
+  Skill,
+  UserRole,
+  WebSearchSettingsView,
+} from "@/lib/types";
 import { cn, formatDate, initials } from "@/lib/utils";
 import {
   AlertIcon,
@@ -20,6 +27,7 @@ import {
   TrashIcon,
   UsersIcon,
 } from "./icons";
+import { ToolsCard } from "./tools-card";
 
 function Card({
   icon,
@@ -50,10 +58,14 @@ export function AdminDashboard({
   currentUser,
   initialUsers,
   initialSettings,
+  initialWebSearch,
+  initialSkills,
 }: {
   currentUser: PublicUser;
   initialUsers: AdminUser[];
   initialSettings: ProviderSettingsView;
+  initialWebSearch: WebSearchSettingsView;
+  initialSkills: Skill[];
 }) {
   const [users, setUsers] = useState<AdminUser[]>(initialUsers);
   const [baseUrl, setBaseUrl] = useState(initialSettings.baseUrl);
@@ -529,6 +541,8 @@ export function AdminDashboard({
             )}
           </div>
         </Card>
+
+        <ToolsCard initialWebSearch={initialWebSearch} initialSkills={initialSkills} />
 
         <Card
           icon={<UsersIcon className="size-4" />}
